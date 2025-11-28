@@ -11,14 +11,18 @@ const envFile = process.env.NODE_ENV === "production" ? ".env.remote" : ".env.lo
 dotenv.config({ path: path.join(__dirname, "..", "..", envFile) });
 
 const { Pool } = pkg;
-
+// ... import ส่วนบน ...
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT
+  port: process.env.DB_PORT,
+  ssl: {
+    rejectUnauthorized: false // 👈 ต้องมีบรรทัดนี้ ไม่งั้นต่อ DB ไม่ได้
+  }
 });
+// ... ส่วนล่าง ...
 
 // ตรวจสอบการเชื่อมต่อ
 pool.connect()
