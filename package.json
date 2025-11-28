@@ -2,13 +2,14 @@
   "name": "sanboonfarm",
   "version": "1.0.0",
   "scripts": {
-    "start": "npm run frontend:build && npm run frontend:copy && cd CEbook/server && npm install && npm start",
-    "frontend:build": "cd login-react && npm install && npm run build",
-    "frontend:copy": "cp -r login-react/build/* CEbook/server/public/"
+    "start": "npm run frontend:build && cd server && npm install && node index.js",
+    "frontend:build": "cd login-react && npm install && npm run build"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.2.1",
+    "firebase": "^12.6.0",
+    "install": "^0.13.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3"
   },
