@@ -81,7 +81,7 @@ const Home = () => {
       document.body.style.minHeight = '';
       document.body.style.margin = '';
     };
-  }, [navigate]); // เอา selectedDeviceId ออกจาก dependency เพื่อไม่ให้ loop
+  }, [navigate, selectedDeviceId]); // เพิ่ม selectedDeviceId เพื่อแก้ ESLint warning
 
   // 2. ดึงข้อมูลคุณภาพน้ำเมื่อ selectedDeviceId เปลี่ยน
   useEffect(() => {
