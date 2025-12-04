@@ -140,14 +140,20 @@ router.post('/water-quality-sensor', async (req, res) => {
 
 
 // GET /member/devices - ดึงข้อมูลอุปกรณ์ทั้งหมด ของ User คนนั้นๆ
-router.get('/devices', verifyToken, async (req, res) => {
+router.get("/devices", verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        const result = await pool.query('SELECT * FROM devices WHERE user_id = $1 ORDER BY added_at DESC', [userId]);
-        res.json(result.rows);
+        // Join เพื่อดึงข้อมูล Device ออกมาเฉพาะของ User คนนั้น
+        const devices = await pool.query(
+            `SELECT ud.device_id, ud.device_name, ud.location, d.* FROM user_devices ud
+             JOIN devices d ON ud.device_id = d.device_id
+             WHERE ud.user_id = $1`, 
+            [userId]
+        );
+        res.json(devices.rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Error fetching devices' });
+        res.status(500).send("Server Error");
     }
 });
 
@@ -160,22 +166,22 @@ router.post("/devices/add", verifyToken, async (req, res) => {
     }
 
     try {
-        // --- ส่วนที่ 1: จัดการตาราง Master (devices) ---
-        // เช็คว่า Device ID นี้เคยถูกลงทะเบียนในระบบโลกหรือยัง
+        // --- 1. ตรวจสอบและลงทะเบียน Device เข้าสู่ระบบกลาง (Table: devices) ---
+        // เช็คว่า Device ID นี้เคยถูกเปิดใช้งานในระบบหรือยัง
         const deviceCheck = await pool.query("SELECT * FROM devices WHERE device_id = $1", [deviceId]);
         
         if (deviceCheck.rows.length === 0) {
-            // ถ้ายังไม่มีในระบบเลย ให้สร้างใหม่ (เป็น Master Data)
-            // หมายเหตุ: ตรงนี้ถ้าตาราง devices เดิมของคุณมี column user_id ที่บังคับใส่ (NOT NULL) 
-            // คุณอาจจะต้องแก้ SQL นี้ให้ใส่ user_id ของคนแรก หรือแก้ตารางให้ user_id เป็น NULL ได้
+            // ถ้ายังไม่มีในระบบเลย ให้สร้างใหม่ (Master Data)
+            // หมายเหตุ: เราใส่ userId ไปด้วยเพื่อให้รู้ว่าใครเป็นคนแรกที่เปิดใช้งานเครื่องนี้
+            // (แต่สิทธิ์การใช้งานจริงจะดูที่ตาราง user_devices แทน)
             await pool.query(
-                "INSERT INTO devices (device_id, device_name, location) VALUES ($1, $2, $3)",
-                [deviceId, deviceName, location]
+                "INSERT INTO devices (device_id, device_name, location, user_id) VALUES ($1, $2, $3, $4)",
+                [deviceId, deviceName, location, userId]
             );
         }
 
-        // --- ส่วนที่ 2: จัดการสิทธิ์เจ้าของ (user_devices) ---
-        // เช็คว่า User คนนี้ เคยเพิ่ม Device นี้ไปแล้วหรือยัง? (ป้องกันการเพิ่มซ้ำของคนเดิม)
+        // --- 2. ตรวจสอบสิทธิ์และการซ้ำซ้อน (Table: user_devices) ---
+        // เช็คว่า User คนนี้ เคยเพิ่ม Device นี้ไปแล้วหรือยัง?
         const userDeviceCheck = await pool.query(
             "SELECT * FROM user_devices WHERE user_id = $1 AND device_id = $2",
             [userId, deviceId]
@@ -185,8 +191,7 @@ router.post("/devices/add", verifyToken, async (req, res) => {
             return res.status(400).json({ msg: "คุณได้เพิ่มอุปกรณ์นี้ไปแล้ว" });
         }
 
-        // เพิ่มสิทธิ์ความเป็นเจ้าของลงในตารางใหม่
-        // ข้อมูล deviceName และ location ตรงนี้จะเป็นของ User คนนั้นๆ เอง
+        // --- 3. บันทึกสิทธิ์การใช้งาน (Link User กับ Device) ---
         const newDeviceLink = await pool.query(
             "INSERT INTO user_devices (user_id, device_id, device_name, location) VALUES ($1, $2, $3, $4) RETURNING *",
             [userId, deviceId, deviceName, location]
