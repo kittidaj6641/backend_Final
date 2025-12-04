@@ -153,8 +153,6 @@ router.get('/devices', verifyToken, async (req, res) => {
 
 router.post("/devices/add", verifyToken, async (req, res) => {
     const { deviceName, deviceId, location } = req.body;
-
-    // req.user.id มาจาก verifyToken ซึ่งคือ id ของ user ที่ login อยู่
     const userId = req.user.id;
 
     if (!deviceName || !deviceId) {
@@ -162,23 +160,43 @@ router.post("/devices/add", verifyToken, async (req, res) => {
     }
 
     try {
-        // 1. ตรวจสอบว่ามี Device ID ซ้ำหรือไม่ (ในระบบทั้งหมด ไม่ใช่แค่ของ user นี้)
-        const deviceExists = await pool.query("SELECT * FROM devices WHERE device_id = $1", [deviceId]);
-        if (deviceExists.rows.length > 0) {
-            return res.status(400).json({ msg: "รหัสอุปกรณ์นี้มีอยู่แล้วในระบบ" });
+        // --- ส่วนที่ 1: จัดการตาราง Master (devices) ---
+        // เช็คว่า Device ID นี้เคยถูกลงทะเบียนในระบบโลกหรือยัง
+        const deviceCheck = await pool.query("SELECT * FROM devices WHERE device_id = $1", [deviceId]);
+        
+        if (deviceCheck.rows.length === 0) {
+            // ถ้ายังไม่มีในระบบเลย ให้สร้างใหม่ (เป็น Master Data)
+            // หมายเหตุ: ตรงนี้ถ้าตาราง devices เดิมของคุณมี column user_id ที่บังคับใส่ (NOT NULL) 
+            // คุณอาจจะต้องแก้ SQL นี้ให้ใส่ user_id ของคนแรก หรือแก้ตารางให้ user_id เป็น NULL ได้
+            await pool.query(
+                "INSERT INTO devices (device_id, device_name, location) VALUES ($1, $2, $3)",
+                [deviceId, deviceName, location]
+            );
         }
 
-        // 2. บันทึกลงฐานข้อมูล (ตาราง devices)
-        const newDevice = await pool.query(
-            "INSERT INTO devices (device_name, device_id, location, user_id) VALUES ($1, $2, $3, $4) RETURNING *",
-            [deviceName, deviceId, location, userId]
+        // --- ส่วนที่ 2: จัดการสิทธิ์เจ้าของ (user_devices) ---
+        // เช็คว่า User คนนี้ เคยเพิ่ม Device นี้ไปแล้วหรือยัง? (ป้องกันการเพิ่มซ้ำของคนเดิม)
+        const userDeviceCheck = await pool.query(
+            "SELECT * FROM user_devices WHERE user_id = $1 AND device_id = $2",
+            [userId, deviceId]
         );
 
-        res.status(201).json({ msg: "เพิ่มอุปกรณ์สำเร็จ", device: newDevice.rows[0] });
+        if (userDeviceCheck.rows.length > 0) {
+            return res.status(400).json({ msg: "คุณได้เพิ่มอุปกรณ์นี้ไปแล้ว" });
+        }
+
+        // เพิ่มสิทธิ์ความเป็นเจ้าของลงในตารางใหม่
+        // ข้อมูล deviceName และ location ตรงนี้จะเป็นของ User คนนั้นๆ เอง
+        const newDeviceLink = await pool.query(
+            "INSERT INTO user_devices (user_id, device_id, device_name, location) VALUES ($1, $2, $3, $4) RETURNING *",
+            [userId, deviceId, deviceName, location]
+        );
+
+        res.status(201).json({ msg: "เพิ่มอุปกรณ์สำเร็จ", device: newDeviceLink.rows[0] });
+
     } catch (err) {
         console.error("Error adding device:", err);
         res.status(500).json({ error: "Server Error " + err.message });
     }
 });
-
 export default router;
