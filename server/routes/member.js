@@ -88,6 +88,7 @@ router.get("/login-logs", verifyToken, async (req, res) => {
 });
 
 // ดึงข้อมูล water_quality 8 ตัวล่าสุด (Filter ตาม Device ID)
+// ดึงข้อมูล water_quality 8 ตัวล่าสุด (Filter ตาม Device ID)
 router.get("/water-quality", verifyToken, async (req, res) => {
     const { deviceId } = req.query;
 
@@ -96,13 +97,22 @@ router.get("/water-quality", verifyToken, async (req, res) => {
     }
 
     try {
-        // ตรวจสอบว่า device นี้เป็นของ user นี้จริงหรือไม่
-        const deviceCheck = await pool.query("SELECT * FROM devices WHERE device_id = $1 AND user_id = $2", [deviceId, req.user.id]);
+        // [แก้ไขจุดนี้] เปลี่ยนไปเช็คสิทธิ์จากตาราง user_devices แทน
+        // เพื่อดูว่า User คนนี้ (req.user.id) มีชื่อผูกกับ Device นี้หรือไม่
+        const deviceCheck = await pool.query(
+            "SELECT * FROM user_devices WHERE device_id = $1 AND user_id = $2", 
+            [deviceId, req.user.id]
+        );
+
         if (deviceCheck.rows.length === 0) {
-            return res.status(403).json({ msg: "Unauthorized access to this device" });
+            return res.status(403).json({ msg: "คุณไม่มีสิทธิ์เข้าถึงอุปกรณ์นี้ (Unauthorized access)" });
         }
 
-        const result = await pool.query("SELECT * FROM water_quality WHERE device_id = $1 ORDER BY recorded_at DESC LIMIT 8", [deviceId]);
+        // ถ้ามีสิทธิ์ ก็ดึงข้อมูลตามปกติ
+        const result = await pool.query(
+            "SELECT * FROM water_quality WHERE device_id = $1 ORDER BY recorded_at DESC LIMIT 8", 
+            [deviceId]
+        );
         res.json(result.rows);
     } catch (err) {
         console.error('Water quality fetch error:', err);
@@ -140,20 +150,23 @@ router.post('/water-quality-sensor', async (req, res) => {
 
 
 // GET /member/devices - ดึงข้อมูลอุปกรณ์ทั้งหมด ของ User คนนั้นๆ
-router.get("/devices", verifyToken, async (req, res) => {
+// GET /member/devices - ดึงข้อมูลอุปกรณ์ทั้งหมด ของ User คนนั้นๆ
+router.get('/devices', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        // Join เพื่อดึงข้อมูล Device ออกมาเฉพาะของ User คนนั้น
-        const devices = await pool.query(
-            `SELECT ud.device_id, ud.device_name, ud.location, d.* FROM user_devices ud
-             JOIN devices d ON ud.device_id = d.device_id
-             WHERE ud.user_id = $1`, 
-            [userId]
-        );
-        res.json(devices.rows);
+        // [แก้ไขจุดนี้] Join ตารางเพื่อให้ได้ข้อมูลอุปกรณ์ที่ถูกต้องตามสิทธิ์ของ User
+        const query = `
+            SELECT ud.device_name, ud.location, d.device_id 
+            FROM user_devices ud
+            JOIN devices d ON ud.device_id = d.device_id
+            WHERE ud.user_id = $1
+            ORDER BY ud.created_at DESC
+        `;
+        const result = await pool.query(query, [userId]);
+        res.json(result.rows);
     } catch (err) {
         console.error(err);
-        res.status(500).send("Server Error");
+        res.status(500).json({ error: 'Error fetching devices' });
     }
 });
 
