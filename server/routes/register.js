@@ -5,52 +5,48 @@ import dotenv from "dotenv";
 
 dotenv.config();
 const router = express.Router();
+app.post('/register', async (req, res) => {
+    const { username, password, name } = req.body;
 
-// Register
-router.post("/register", async (req, res) => {
-    const { name, email, password } = req.body;
+    // เริ่ม Transaction (แนะนำ เพื่อความชัวร์ ถ้าพังให้พังทั้งคู่)
+    const client = await pool.connect();
 
     try {
-        // 1. ตรวจสอบว่าข้อมูลครบถ้วน
-        if (!name || !email || !password) {
-            return res.status(400).json({ msg: "กรุณากรอกข้อมูลให้ครบถ้วน" });
-        }
+        await client.query('BEGIN'); // เริ่มกระบวนการ
 
-        // 2. ตรวจสอบว่า email ซ้ำหรือไม่
-        const userExists = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-        if (userExists.rows.length > 0) {
-            return res.status(409).json({ msg: "Email นี้มีการใช้งานแล้ว" });
-        }
+        // 1. สร้าง User ใหม่ และขอ ID กลับมาทันที (RETURNING id)
+        const userQuery = `
+            INSERT INTO users (username, password, name) 
+            VALUES ($1, $2, $3) 
+            RETURNING id
+        `;
+        const userResult = await client.query(userQuery, [username, password, name]);
+        
+        // รับค่า ID ของ User ที่เพิ่งสมัคร
+        const newUserId = userResult.rows[0].id;
 
-        // 3. แฮชรหัสผ่าน
-        const hashedPass = await bcrypt.hash(password, 10);
+        // 2. เพิ่มอุปกรณ์เริ่มต้น (ESP32_001) ให้ User คนนี้ทันที
+        const deviceQuery = `
+            INSERT INTO user_devices (user_id, device_id, device_name, location) 
+            VALUES ($1, $2, $3, $4)
+        `;
+        // ค่า Default: device_id = 'ESP32_001', ชื่อ = 'อุปกรณ์เริ่มต้น', สถานที่ = 'A'
+        await client.query(deviceQuery, [newUserId, 'ESP32_001', 'อุปกรณ์เริ่มต้น', 'A']);
 
-        // 4. เพิ่มผู้ใช้ใหม่ (แก้ตรงนี้: ให้ RETURNING id กลับมาด้วย)
-        const newUser = await pool.query(
-            "INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email",
-            [name, email, hashedPass]
-        );
+        await client.query('COMMIT'); // บันทึกข้อมูลทั้งหมดลงฐานข้อมูลจริง
 
-        // ดึง ID ของ User ใหม่ที่เพิ่งสร้าง
-        const newUserId = newUser.rows[0].id;
-
-        // 5. เพิ่มอุปกรณ์เริ่มต้น (ESP32_001) ให้ User คนนี้ทันที
-        // สมมติว่าตารางชื่อ devices และมีฟิลด์ user_id, device_id, device_name, location
-        await pool.query(
-            "INSERT INTO devices (user_id, device_id, device_name, location) VALUES ($1, $2, $3, $4)",
-            [newUserId, 'ESP32_001', 'อุปกรณ์เริ่มต้น', 'ฟาร์มของฉัน']
-        );
-
-        res.status(201).json({ 
-            msg: "สมัครสมาชิกสำเร็จ และเพิ่มอุปกรณ์เริ่มต้นเรียบร้อยแล้ว", 
-            user: newUser.rows[0] 
+        // 3. ส่ง Response กลับไปหาหน้าเว็บ (ส่งแค่ครั้งเดียวตรงนี้)
+        res.json({ 
+            status: 'success', 
+            message: 'สมัครสมาชิกและเพิ่มอุปกรณ์สำเร็จ' 
         });
 
     } catch (err) {
-        console.error('User registration error:', err);
-        res.status(500).json({ msg: "เกิดข้อผิดพลาดในเซิร์ฟเวอร์" });
+        await client.query('ROLLBACK'); // ถ้ามีอะไรผิดพลาด ให้ยกเลิกการบันทึกทั้งหมด
+        console.error(err);
+        res.status(500).json({ status: 'error', message: 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์' });
+    } finally {
+        client.release(); // คืน Connection
     }
 });
-
-
 export default router;
