@@ -110,9 +110,9 @@ router.get("/water-quality", verifyToken, async (req, res) => {
 
         // ถ้ามีสิทธิ์ ก็ดึงข้อมูลตามปกติ
         const result = await pool.query(
-            "SELECT * FROM water_quality WHERE device_id = $1 ORDER BY recorded_at DESC ", 
-            [deviceId]
-        );
+"SELECT * FROM water_quality WHERE device_id = $1 ORDER BY recorded_at DESC LIMIT 1",
+[deviceId]
+);
         res.json(result.rows);
     } catch (err) {
         console.error('Water quality fetch error:', err);
