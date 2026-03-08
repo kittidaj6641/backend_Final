@@ -46,3 +46,5 @@ router.get("/water-quality", verifyToken, async (req, res) => {
         res.status(500).json({ error: "Server Error " + err.message });
     }
 });
+
+export default router;
