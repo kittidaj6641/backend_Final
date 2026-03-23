@@ -217,4 +217,42 @@ router.post("/devices/add", verifyToken, async (req, res) => {
         res.status(500).json({ error: "Server Error " + err.message });
     }
 });
+
+// ==========================================
+// ลบอุปกรณ์ (Delete Device)
+// ==========================================
+router.delete("/devices/:deviceId", verifyToken, async (req, res) => {
+    const { deviceId } = req.params;
+    const userId = req.user.id;
+
+    try {
+        // 1. เช็คก่อนว่า User คนนี้เป็นเจ้าของอุปกรณ์นี้จริงหรือไม่
+        const checkOwnership = await pool.query(
+            "SELECT * FROM user_devices WHERE user_id = $1 AND device_id = $2",
+            [userId, deviceId]
+        );
+
+        if (checkOwnership.rows.length === 0) {
+            return res.status(403).json({ msg: "คุณไม่มีสิทธิ์ลบอุปกรณ์นี้ หรือไม่พบอุปกรณ์" });
+        }
+
+        // 2. ลบข้อมูลจากตารางที่เกี่ยวข้อง 
+        // (ต้องเรียงลำดับการลบจากตารางลูกไปตารางแม่ เพื่อป้องกัน Foreign Key Constraint Error)
+        
+        // ลำดับที่ 1: ลบสิทธิ์การเข้าถึงออกจากตาราง user_devices
+        await pool.query("DELETE FROM user_devices WHERE user_id = $1 AND device_id = $2", [userId, deviceId]);
+
+        // ลำดับที่ 2: ลบประวัติคุณภาพน้ำของเซนเซอร์ตัวนี้ทิ้งทั้งหมด
+        await pool.query("DELETE FROM water_quality WHERE device_id = $1", [deviceId]);
+
+        // ลำดับที่ 3: ลบข้อมูลอุปกรณ์ออกจากตารางหลัก (Master Data)
+        await pool.query("DELETE FROM devices WHERE device_id = $1", [deviceId]);
+
+        res.json({ msg: "ลบอุปกรณ์และข้อมูลที่เกี่ยวข้องสำเร็จ" });
+
+    } catch (err) {
+        console.error("Delete device error:", err);
+        res.status(500).json({ error: "Server Error " + err.message });
+    }
+});
 export default router;
