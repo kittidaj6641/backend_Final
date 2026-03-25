@@ -5,10 +5,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 const router = express.Router();
+
 router.post("/register", async (req, res) => {
     const { name, email, password } = req.body;
 
-    // 1. เชื่อมต่อ Client เพื่อเริ่ม Transaction (สำคัญมากสำหรับการบันทึก 2 ตารางพร้อมกัน)
+    // 1. เชื่อมต่อ Client
     const client = await pool.connect();
 
     try {
@@ -20,7 +21,6 @@ router.post("/register", async (req, res) => {
         }
 
         // --- ตรวจสอบ Email ซ้ำ ---
-        // ใช้ client.query แทน pool.query ภายใน Transaction
         const userExists = await client.query("SELECT * FROM users WHERE email = $1", [email]);
         if (userExists.rows.length > 0) {
             await client.query('ROLLBACK'); // ยกเลิกถ้าเจอซ้ำ
@@ -31,7 +31,6 @@ router.post("/register", async (req, res) => {
         const hashedPass = await bcrypt.hash(password, 10);
 
         // --- เพิ่มผู้ใช้ใหม่ ---
-        // *สำคัญ* ต้องใส่ RETURNING id เพื่อเอา id ไปใช้ต่อ
         const newUserQuery = `
             INSERT INTO users (name, email, password) 
             VALUES ($1, $2, $3) 
@@ -39,23 +38,13 @@ router.post("/register", async (req, res) => {
         `;
         const newUserResult = await client.query(newUserQuery, [name, email, hashedPass]);
         
-        const newUserId = newUserResult.rows[0].id; // ได้ ID มาแล้ว
+        // (ลบโค้ดส่วนการ Insert อุปกรณ์เริ่มต้นออกแล้ว)
 
-        // --- เพิ่มอุปกรณ์เริ่มต้น (ESP32_001) ให้ทันที ---
-        // เช็คชื่อตารางใน DB คุณให้ดีนะครับ (user_devices หรือ devices)
-        // ตามภาพที่คุณเคยส่งมา ตารางชื่อ 'user_devices'
-        const addDeviceQuery = `
-            INSERT INTO user_devices (user_id, device_id, device_name, location) 
-            VALUES ($1, $2, $3, $4)
-        `;
-        
-        // กำหนดให้ทุกคนได้ 'ESP32_001' เหมือนกัน
-        await client.query(addDeviceQuery, [newUserId, 'ESP32_001', 'อุปกรณ์เริ่มต้น', 'A']);
+        await client.query('COMMIT'); // ยืนยันการบันทึกข้อมูลลงฐานข้อมูล
 
-        await client.query('COMMIT'); // ยืนยันการบันทึกข้อมูลทั้งหมดลงฐานข้อมูล
-
+        // เปลี่ยนข้อความ Response ให้ถูกต้อง
         res.status(201).json({ 
-            msg: "สมัครสมาชิกและเพิ่มอุปกรณ์สำเร็จ", 
+            msg: "สมัครสมาชิกสำเร็จ", 
             user: newUserResult.rows[0] 
         });
 
@@ -67,4 +56,5 @@ router.post("/register", async (req, res) => {
         client.release(); // คืน Connection ให้ Pool
     }
 });
+
 export default router;
